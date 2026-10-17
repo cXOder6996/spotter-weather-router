@@ -2,7 +2,6 @@
 
 > 🌐 **Live Demo (Frontend)**: [https://spotter-weather-frontend.onrender.com](https://spotter-weather-frontend.onrender.com)  
 > ⚡ **API Service (Backend)**: [https://spotter-weather-backend.onrender.com/api/health/](https://spotter-weather-backend.onrender.com/api/health/)  
-> 📹 **Loom Walkthrough**: [Watch the 5-Minute Project Tour](https://www.loom.com) *(Insert your recording URL here)*
 
 A full-stack commercial routing application that helps truck drivers and fleet dispatchers evaluate and select the safest driving routes based on real-time weather forecasts, truck load weight, and travel time.
 
