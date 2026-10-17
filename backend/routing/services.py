@@ -274,6 +274,7 @@ def batch_fetch_weather(checkpoints, departure, load_weight_lb=30000):
     for cp in checkpoints:
         # Find nearest weather station
         hourly = None
+        nearest_s = None
         if cached_stations:
             nearest_s = min(
                 cached_stations.keys(),
