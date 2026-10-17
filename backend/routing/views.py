@@ -15,7 +15,7 @@ def health_check(request):
     return JsonResponse({
         "status": "healthy",
         "service": "spotter-weather-router",
-        "version": "2.0.0",
+        "version": "2.1.0",
     })
 
 
