@@ -1,4 +1,4 @@
-# Spotter — Weather-Aware Truck Routing
+# Spotter - Weather-Aware Truck Routing
 
 A full-stack web application that helps truck drivers and fleet dispatchers evaluate and select the safest commercial driving routes based on real-time weather forecasts, truck load weight, and travel time.
 
