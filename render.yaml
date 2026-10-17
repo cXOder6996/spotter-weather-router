@@ -21,8 +21,7 @@ services:
   # React + Vite Frontend
   - type: web
     name: spotter-weather-frontend
-    env: static
-    plan: free
+    runtime: static
     rootDir: frontend
     buildCommand: npm install && npm run build
     staticPublishPath: dist
