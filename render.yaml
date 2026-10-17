@@ -31,7 +31,4 @@ services:
         destination: /index.html
     envVars:
       - key: VITE_API_URL
-        fromService:
-          type: web
-          name: spotter-weather-backend
-          property: host
+        value: https://spotter-weather-backend.onrender.com

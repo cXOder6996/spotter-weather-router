@@ -2,9 +2,22 @@ import { useState, useEffect, useRef } from 'react'
 import { MapContainer, TileLayer, Polyline, CircleMarker, Popup, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import HeatmapLayer from './HeatmapLayer'
-
-const API = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000'
-
+const RAW_API = import.meta.env.VITE_API_URL || ''
+const API = (() => {
+  if (!RAW_API || RAW_API === 'undefined' || RAW_API === 'null') {
+    return typeof window !== 'undefined' && window.location.hostname.includes('onrender.com')
+      ? 'https://spotter-weather-backend.onrender.com'
+      : 'http://127.0.0.1:8000'
+  }
+  let url = RAW_API.trim()
+  if (!url.startsWith('http://') && !url.startsWith('https://')) {
+    if (!url.includes('.')) {
+      url = `${url}.onrender.com`
+    }
+    url = `https://${url}`
+  }
+  return url.replace(/\/+$/, '')
+})()
 const RISK_COLORS = {
   low: '#10b981',
   moderate: '#f59e0b',
@@ -76,7 +89,13 @@ export default function App() {
           checkpoint_interval_miles: Number(form.checkpoint_interval_miles),
         }),
       })
-      const body = await res.json()
+      const text = await res.text()
+      let body
+      try {
+        body = JSON.parse(text)
+      } catch (parseErr) {
+        throw new Error(`Server returned status ${res.status}: ${text.slice(0, 100) || 'Empty response'}`)
+      }
       if (!res.ok) throw new Error(body.error || 'Route analysis failed')
       setData(body)
       setSelected(body.recommendation || body.routes?.[0]?.id || null)
