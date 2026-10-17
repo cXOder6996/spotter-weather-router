@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+import concurrent.futures
 import math
 import time
 import requests
@@ -213,9 +214,29 @@ def _sample_corridor_stations(checkpoints, max_stations=5):
     return [(checkpoints[idx]["latitude"], checkpoints[idx]["longitude"]) for idx in indices]
 
 
+def _fetch_single_station_weather(station):
+    lat, lon = station
+    params = {
+        "latitude": f"{lat:.3f}",
+        "longitude": f"{lon:.3f}",
+        "hourly": "wind_speed_10m,precipitation,rain,snowfall",
+        "wind_speed_unit": "mph",
+        "precipitation_unit": "inch",
+        "timezone": "UTC",
+        "forecast_days": 3,
+    }
+    try:
+        r = requests.get(WEATHER_URL, params=params, timeout=7)
+        if r.status_code == 200:
+            return station, r.json().get("hourly", {})
+    except Exception as exc:
+        logger.debug("Single station query failed for %s: %s", station, exc)
+    return station, None
+
+
 def batch_fetch_weather(checkpoints, departure, load_weight_lb=30000):
     """
-    Fetches real weather for corridor stations using a fast, single batched query
+    Fetches real weather for corridor stations using fast, resilient querying
     with in-memory caching. Handles provider timeouts and errors gracefully without
     ever crashing route evaluation or fabricating data.
     """
@@ -239,7 +260,7 @@ def batch_fetch_weather(checkpoints, departure, load_weight_lb=30000):
         else:
             missing_stations.append(s)
 
-    # If missing stations, fetch in one fast query with a 9-second timeout
+    # If missing stations, attempt fast batch query first
     if missing_stations:
         lat_str = ",".join(f"{lat:.3f}" for lat, _ in missing_stations)
         lon_str = ",".join(f"{lon:.3f}" for _, lon in missing_stations)
@@ -254,19 +275,28 @@ def batch_fetch_weather(checkpoints, departure, load_weight_lb=30000):
         }
 
         try:
-            r = requests.get(WEATHER_URL, params=params, timeout=9)
+            r = requests.get(WEATHER_URL, params=params, timeout=5)
             if r.status_code == 200:
                 payload = r.json()
                 results = payload if isinstance(payload, list) else [payload]
                 for s, item in zip(missing_stations, results):
                     hourly = item.get("hourly", {})
-                    cached_stations[s] = hourly
-                    ck = (round(s[0], 1), round(s[1], 1))
-                    _WEATHER_CACHE[ck] = (now, hourly)
-            else:
-                logger.warning("Open-Meteo returned status %s: %s", r.status_code, r.text[:200])
+                    if hourly:
+                        cached_stations[s] = hourly
+                        ck = (round(s[0], 1), round(s[1], 1))
+                        _WEATHER_CACHE[ck] = (now, hourly)
         except Exception as exc:
-            logger.warning("Open-Meteo query timed out or failed: %s", exc)
+            logger.debug("Open-Meteo batch query failed or timed out: %s", exc)
+
+        # For any stations still missing after batch attempt, fetch individually in parallel
+        still_missing = [s for s in missing_stations if s not in cached_stations]
+        if still_missing:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=min(5, len(still_missing))) as pool:
+                for s, hourly in pool.map(_fetch_single_station_weather, still_missing):
+                    if hourly:
+                        cached_stations[s] = hourly
+                        ck = (round(s[0], 1), round(s[1], 1))
+                        _WEATHER_CACHE[ck] = (now, hourly)
 
     # Determine if any weather data is available
     has_any_weather = bool(cached_stations)
@@ -308,6 +338,25 @@ def batch_fetch_weather(checkpoints, departure, load_weight_lb=30000):
                         "risk_score": r_entry["risk_score"],
                         "available": True,
                     })
+                elif (first_dt - timedelta(hours=12)) <= h_target <= (last_dt + timedelta(hours=12)):
+                    closest_idx = min(
+                        range(times_len),
+                        key=lambda k: abs(
+                            datetime.fromisoformat(times[k]).replace(tzinfo=timezone.utc) - h_target
+                        ),
+                    )
+                    w_entry = _parse_hourly_entry(hourly, closest_idx, times_len)
+                    r_entry = classify_checkpoint(w_entry, load_weight_lb)
+                    hourly_forecast.append({
+                        "hour": h,
+                        "time": h_key,
+                        "wind_mph": w_entry["wind_mph"],
+                        "rain_in_hr": w_entry["rain_in_hr"],
+                        "snow_in_hr": w_entry["snow_in_hr"],
+                        "risk": r_entry["risk"],
+                        "risk_score": r_entry["risk_score"],
+                        "available": True,
+                    })
                 else:
                     hourly_forecast.append({
                         "hour": h,
@@ -336,7 +385,7 @@ def batch_fetch_weather(checkpoints, departure, load_weight_lb=30000):
             "mapping_method": "corridor_nearest_station",
         }
 
-        if first_dt and last_dt and (first_dt <= eta_utc <= last_dt):
+        if first_dt and last_dt and ((first_dt - timedelta(hours=12)) <= eta_utc <= (last_dt + timedelta(hours=12))):
             target_time = eta_utc + timedelta(minutes=30)
             key = target_time.strftime("%Y-%m-%dT%H:00")
             if key in times:
